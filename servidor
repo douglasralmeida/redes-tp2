@@ -1,0 +1,1 @@
+python3.6 src/router.py 127.0.0.1 12 topologia.txt
