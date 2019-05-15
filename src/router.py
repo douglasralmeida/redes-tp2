@@ -18,7 +18,6 @@ parametros = {'periodo' : 0, 'ip': '127.0.0.1', 'partida': ''}
 
 # FUNCOES DO PROGRAMA
 # ===================
-
 def log(msg):
   if EXIBIR_LOG:
     print(msg) 
@@ -33,7 +32,25 @@ def args_processar(parametros):
   if len(sys.argv) > 3:
     parametros['topologia'] = sys.argv[3]
 
+def cmdline_obter():
+  s = ''
+  while len(s) == 0:
+    try:
+      s = input('$ ')
+    except:
+      sys.exit()
+  
+  return s.strip()
+  
+def cmdline_manipular():
+  while (True):
+    cmd = cmdline_obter()
+    if (cmd == 'quit'):
+      sys.exit()
+
 # CORPO DO PROGRAMA
 # =================
 if len(sys.argv) > 2:
   args_processar(parametros)
+  
+  cmd = cmdline_manipular()
