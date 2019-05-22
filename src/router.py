@@ -3,6 +3,7 @@
 
 # TP2 de Redes
 
+import json
 import socket
 import sys 
 import threading
@@ -23,31 +24,34 @@ parametros = {'periodo' : 0, 'ip': '127.0.0.1', 'topologia': '', 'porta': 0, 'ti
 distancias = None
 enlaces = None
 enviathread = None
+mensagens = None
 recebethread = None
+rotasthread = None
 
 # CLASSES DO PROGRAMA
 # ===================
 # Gerencia as distâncias para os demais nós na rede
 class Distancias():
   #modelo dicionario:
-  #distancia = {'prox': '0.0.0.0', 'peso': 0}
+  #distancia = {'prox': '0.0.0.0', 'peso': 0, 'mentor': '0.0.0.0'}
   lista = {}
 
   def __init(self):
     pass
     
-  def adicionar(self, ip, proximo, peso):
-    distancia = {'proximo': proximo, 'peso': peso}
+  def adicionar(self, ip, proximo, peso, mentor):
+    distancia = {'proximo': proximo, 'peso': peso, 'mentor': mentor}
     self.lista[ip] = distancia
     
   def exibir(self):
     for (chave, distancia) in self.lista.items():
-      print(chave, distancia['peso'], "     ", distancia['proximo'])
+      print(chave, distancia['peso'], "     ", distancia['proximo'], "  ", distancia['mentor'])
 
   def remover(self, ip):
     for (chave, distancia) in self.lista.items():
-      if chave == ip:
+      if chave == distancia['proximo']:
         del distancia
+    #comando para recalcular distancias onde o proximo é o ip removido
 
   def removertudo(self):
     for distancia in self.lista.values():
@@ -55,23 +59,21 @@ class Distancias():
 
 # Thread para Enviar dados
 class EnviaDadosThread(threading.Thread):
-  def __init__(self, soquete, periodo):
+  def __init__(self, soquete):
     threading.Thread.__init__(self)
-    self.periodo = periodo
     self.soquete = soquete
-    self.enviardados = True    
+    self.ativa = True
     log("\n[+] Nova thread para o envio de dados.")
 
   def desligar(self):
-    self.enviardados = False
+    self.ativa = False
 
-  # enviar dados para todos os enlaces
+  # enviar dados para o detino especificado
   def run(self):
-    while(self.enviardados):
+    while(self.ativa):
       try:
         endereco = ("127.0.0.1", parametros["porta"])
         #self.soquete.sendto(dados, endereco)
-        time.sleep(self.periodo)
       except socket.timeout:
         continue
    
@@ -105,18 +107,35 @@ class Enlaces():
     for enlace in self.lista.values():
       del enlace
 
+# Gera e processa mensagens no formato JSON
+class Mensagens:
+  def __init__(self):
+    pass
+    
+  def gerarAtualizacao(self):
+    pass
+  
+  def gerarDados(self):
+    pass
+  
+  def gerarRastreio(self):
+    pass
+    
+  def gerarTabela(self):
+    pass
+
 # Thread para Receber dados
 class RecebeDadosThread(threading.Thread):
   def __init__(self, soquete):
     threading.Thread.__init__(self)
-    self.escutarrede = True
+    self.ativa = True
     self.soquete = soquete
     self.soquete.settimeout(1)
+    log("\n[+] Nova thread para o recebimento de dados.")
 
-  # manipular o soquete para formar enlaces
+  # manipular o soquete para receber dados e enviar para processamento
   def run(self):
-    log("[+] Nova thread para o recebimento de dados.")
-    while self.escutarrede:
+    while self.ativa:
       try:
         dados, (ip, porta) = self.soquete.recvfrom(MAX_PACOTE)
       except (socket.timeout, OSError):
@@ -128,14 +147,34 @@ class RecebeDadosThread(threading.Thread):
       if not self.escutarrede:
         break
       onrecv(dados)
-    log("[-] Encerrando thread de recebimento de dados.")
+    log("\n[-] Encerrando thread de recebimento de dados.")
     self.soquete.close()
 
   def desligar(self):
-    self.escutarrede = False
+    self.ativa = False
     
   def onrecv(self, dados):
-    log("[>] Recebeu dados: " + dados)
+    log("\n[>] Recebeu dados: " + dados)
+
+# Thread para gerar rotas atualizadas
+class RotasAtualizadasThread(threading.Thread):
+  def __init__(self, intervalo):
+    threading.Thread.__init__(self)
+    self.intervalo = intervalo
+    self.ativa = True    
+    log("\n[+] Nova thread para geração de rotas atualizadas.")
+
+  def desligar(self):
+    self.ativa = False
+
+  # gera a msg de rotas atualizadas a cada intevalo de tempo
+  def run(self):
+    while(self.ativa):
+        time.sleep(self.intervalo)
+   
+    # desligando...
+    log("\n[-] Encerrando thread de geração de rotas atualizadas.")
+
 
 # FUNCOES DO PROGRAMA
 # ===================
@@ -148,6 +187,7 @@ def log(*args, **kwargs):
 # arg1 = ip
 # arg2 = período de repetição da msg
 # arg3 = opcional, arq. topologia inicial da rede
+#   parametros = dicionario onde serão gravados os argumentos
 def args_processar(parametros):
   parametros['ip'] = sys.argv[1]
   parametros['periodo'] = int(sys.argv[2])
@@ -155,7 +195,9 @@ def args_processar(parametros):
     parametros['topologia'] = sys.argv[3]
   parametros['porta'] = PORTA
 
-# -----------------------------------------  
+# -----------------------------------------
+# Carrega um arquivo somente-texto e o quebra em linhas
+#   nomearquivo = nome do arquivo a ser carregado
 def entrada_carregar(nomearquivo):
   arquivo = open(nomearquivo, "r")
   linhas = arquivo.read().splitlines()
@@ -166,7 +208,7 @@ def entrada_carregar(nomearquivo):
 def cmd_add(args):
   if len(args) > 2:
     ip = args[1]
-    distancias.adicionar(ip, ip, args[2])
+    distancias.adicionar(ip, ip, args[2], parametros['ip'])
     enlaces.adicionar(ip)
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
@@ -174,7 +216,7 @@ def cmd_add(args):
 def cmd_del(args):
   if len(args) > 1:
     enlaces.remover(args[1])
-    #comando para recalcular distancias onde o proximo é o ip removido
+    distancias.remover(args[1])
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
 
@@ -186,8 +228,8 @@ def cmd_ip(args):
   print("    Endereço: . . . . : {0}".format(parametros['ip'])) 
   
 def cmd_distances(args):
-  print("IP        PESO     PROXIMO")
-  print("==========================")
+  print("IP        PESO     PROXIMO      APRENDEU DE")
+  print("===========================================")
   distancias.exibir()
 
 def cmd_links(args):
@@ -237,6 +279,8 @@ def cmdline_manipular():
 def app_sair():
   enlaces.removertudo()
   distancias.removertudo()
+  rotasthread.desligar()
+  rotasthread.join()
   recebethread.desligar()
   recebethread.join()
   enviathread.desligar()
@@ -261,7 +305,7 @@ def conexoes_iniciar(param):
   recebethread.start()
   
   # Inicia a thread que irá enviar dados
-  enviathread = EnviaDadosThread(soquete, parametros['periodo'])
+  enviathread = EnviaDadosThread(soquete)
   enviathread.start()
 
 # CORPO DO PROGRAMA
@@ -270,7 +314,10 @@ if len(sys.argv) > 2:
   args_processar(parametros)
   distancias = Distancias()
   enlaces = Enlaces()
+  mensagens = Mensagens()
   conexoes_iniciar((parametros['ip'], parametros['porta']))
+  rotasthread = RotasAtualizadasThread(parametros['periodo'])
+  rotasthread.start()
   if len(parametros['topologia']) > 0:
     comandos = entrada_carregar(parametros['topologia'])
     cmdline_batch(comandos)
