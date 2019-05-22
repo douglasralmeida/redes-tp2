@@ -6,98 +6,143 @@
 import socket
 import sys 
 import threading
+import time
 
 # CONSTANTES DO PROGRAMA
 # ======================
 EXIBIR_LOG         = True
+MAX_PACOTE         = 65507
 PORTA              = 55151
 ARGS_INSUFICIENTES = "Erro com o comando {0}. Argumentos insuficientes."
 CMD_NAOENCONTRADO  = "Comando não encontrado: {0}"
-CONEX_NAOREALIZADA = "A conexão com o endereço {0} não foi realizada."
 PROMPT             = "$ "
 
 # VARIÁVEIS DO PROGRAMA
 # =====================
-parametros = {'periodo' : 0, 'ip': '127.0.0.1', 'topologia': '', 'porta': 0, 'timeout': 7}
-#distancia = {'prox': '0.0.0.0', 'peso': 0}
-distancias = {}
-enlaces = []
-threads = []
-redethread = 0
+parametros = {'periodo' : 0, 'ip': '127.0.0.1', 'topologia': '', 'porta': 0, 'timeout': 6}
+distancias = None
+enlaces = None
+enviathread = None
+recebethread = None
 
 # CLASSES DO PROGRAMA
 # ===================
-# Gerencia um enlace
-class EnlaceThread(threading.Thread):
-  def __init__(self, soquete, ip):
-    threading.Thread.__init__(self)
-    self.soquete = soquete
-    self.ip = ip
-    enlaces.append(ip)
-    log("[+] Nova thread para o enlance ao endereço " + ip + ".")
+# Gerencia as distâncias para os demais nós na rede
+class Distancias():
+  #modelo dicionario:
+  #distancia = {'prox': '0.0.0.0', 'peso': 0}
+  lista = {}
 
-  # manipular o self.soquete para receber dados do enlace
+  def __init(self):
+    pass
+    
+  def adicionar(self, ip, proximo, peso):
+    distancia = {'proximo': proximo, 'peso': peso}
+    self.lista[ip] = distancia
+    
+  def exibir(self):
+    for (chave, distancia) in self.lista.items():
+      print(chave, distancia['peso'], "     ", distancia['proximo'])
+
+  def remover(self, ip):
+    for (chave, distancia) in self.lista.items():
+      if chave == ip:
+        del distancia
+
+  def removertudo(self):
+    for distancia in self.lista.values():
+      del distancia
+
+# Thread para Enviar dados
+class EnviaDadosThread(threading.Thread):
+  def __init__(self, soquete, periodo):
+    threading.Thread.__init__(self)
+    self.periodo = periodo
+    self.soquete = soquete
+    self.enviardados = True    
+    log("\n[+] Nova thread para o envio de dados.")
+
+  def desligar(self):
+    self.enviardados = False
+
+  # enviar dados para todos os enlaces
   def run(self):
-    while(True):
+    while(self.enviardados):
       try:
-        dados = self.soquete.recv()
+        endereco = ("127.0.0.1", parametros["porta"])
+        #self.soquete.sendto(dados, endereco)
+        time.sleep(self.periodo)
       except socket.timeout:
+        continue
+   
+    # desconectando...
+    log("\n[-] Encerrando thread de envio de dados.")
+    self.soquete.close()        
+
+# Gerencia os enlaces na rede
+class Enlaces():
+  #modelo dicionario:
+  #enlace = {'ip': '0.0.0.0'}
+  lista = {}
+
+  def __init(self):
+    pass
+    
+  def adicionar(self, ip):
+    enlace = {'valor': 1}
+    self.lista[ip] = enlace
+    
+  def exibir(self):
+    for chave in self.lista.keys():
+      print(chave)
+
+  def remover(self, ip):
+    for (chave, enlace) in self.lista.items():
+      if chave == ip:
+        del enlace
+
+  def removertudo(self):
+    for enlace in self.lista.values():
+      del enlace
+
+# Thread para Receber dados
+class RecebeDadosThread(threading.Thread):
+  def __init__(self, soquete):
+    threading.Thread.__init__(self)
+    self.escutarrede = True
+    self.soquete = soquete
+    self.soquete.settimeout(1)
+
+  # manipular o soquete para formar enlaces
+  def run(self):
+    log("[+] Nova thread para o recebimento de dados.")
+    while self.escutarrede:
+      try:
+        dados, (ip, porta) = self.soquete.recvfrom(MAX_PACOTE)
+      except (socket.timeout, OSError):
         continue
       if not dados:
         break
       if dados == '':
         break
-      
-      # recebeu uma mensagen
-      self.onrecv(client, dados)
-   
-    # removendo cliente da listas de enlaces
-    enlaces.remove(ip)
-    log("[-] Encerrando thread do enlance ao endereço " + ip + ".")
-    
-    # desconectando...
-    sel.soquete.close()
-    
-    # encerrando thread
-    thread.exit()
-    threads.remove(self)
-    
-  def onrecv(self):
-    pass
-
-# Cria enlaces com a rede passivamente
-class RedeThread(threading.Thread):
-  def __init__(self, soquete):
-    threading.Thread.__init__(self)
-    self.escutarrede = True
-    self.soquete = soquete
-    self.soquete.listen(4)
-    self.soquete.settimeout(1)
-
-  # manipular o soquete para formar enlaces
-  def run(self):
-    log("[O] Aguardando por novas conexões...")
-    while self.escutarrede:
-      try:
-        (cliente, (ip, porta)) = self.soquete.accept()
-      except socket.timeout:
-        continue
       if not self.escutarrede:
         break
-      enlacethread = EnlaceThread(cliente, ip)
-      enlacethread.start()
-      threads.append(enlacethread)
-    log("[O] Encerrando escuta por novas conexões...")
-      
+      onrecv(dados)
+    log("[-] Encerrando thread de recebimento de dados.")
+    self.soquete.close()
+
   def desligar(self):
     self.escutarrede = False
+    
+  def onrecv(self, dados):
+    log("[>] Recebeu dados: " + dados)
 
 # FUNCOES DO PROGRAMA
 # ===================
-def log(msg):
+def log(*args, **kwargs):
   if EXIBIR_LOG:
-    print(msg) 
-
+    print(*args, file=sys.stderr, **kwargs)
+    
 # -----------------------------------------
 # Lê os argumentos do programa
 # arg1 = ip
@@ -118,54 +163,46 @@ def entrada_carregar(nomearquivo):
     yield linha
 
 # -----------------------------------------
-def distancias_adicionar(ip, distancia):
-  distancias[ip] = distancia
-  
-def distancias_remover(ip):
-  del distancias[ip]
-  
-def distancias_obterpeso(ip):
-  return distancias[ip]['peso']
-
-def distancias_obterprox(ip):
-  return distancias[ip]['prox']
-
-# -----------------------------------------
 def cmd_add(args):
   if len(args) > 2:
     ip = args[1]
-    distancia = {'prox': ip, 'peso': args[2]}
-    soquete = rede_conectar((ip, parametros['porta']))
-    if soquete is None:
-      print(CONEX_NAOREALIZADA.format(ip))
-      return
-    enlacethread = EnlaceThread(soquete, ip)
-    enlacethread.start()
-    threads.append(enlacethread)    
-    distancias_adicionar(ip, distancia)
+    distancias.adicionar(ip, ip, args[2])
+    enlaces.adicionar(ip)
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
 
 def cmd_del(args):
   if len(args) > 1:
-    distancias_remover(args[1])
+    enlaces.remover(args[1])
+    #comando para recalcular distancias onde o proximo é o ip removido
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
 
 def cmd_quit(args):
   app_sair()
+
+def cmd_ip(args):
+  print("\nConfiguração de IP:\n")
+  print("    Endereço: . . . . : {0}".format(parametros['ip'])) 
   
-def cmd_links(args):
+def cmd_distances(args):
   print("IP        PESO     PROXIMO")
   print("==========================")
-  for ip in distancias.keys():
-    print(ip, distancias_obterpeso(ip), "     ", distancias_obterprox(ip))
+  distancias.exibir()
+
+def cmd_links(args):
+  print("\nEnlaces:\n")
+  print("IP")
+  print("==========================")
+  enlaces.exibir()
 
 cmds_disponiveis = {
   "add": cmd_add,
   "del": cmd_del,
   "quit": cmd_quit,
-  "links": cmd_links
+  "ip": cmd_ip,
+  "links": cmd_links,
+  "distances": cmd_distances
 }
 
 # -----------------------------------------
@@ -198,42 +235,42 @@ def cmdline_manipular():
 
 # -----------------------------------------
 def app_sair():
-  for t in threads:
-    t.join()
-  redethread.desligar()
-  redethread.join()
+  enlaces.removertudo()
+  distancias.removertudo()
+  recebethread.desligar()
+  recebethread.join()
+  enviathread.desligar()
+  enviathread.join()
   sys.exit()
   
 # -----------------------------------------
-def rede_iniciar(param):
-  global redethread
+def conexoes_iniciar(param):
+  global enviathread
+  global recebethread
   
   # Cria um soquete para comunicação externa
-  soquete = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  soquete = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
   # Para evitar a exceção "address already in use",
   # desligar esse comportamento com uma opção da API de soquetes:
   soquete.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
   soquete.bind(param)
 
-  # Inicia a thread que irá escutar por novas conexões
-  redethread = RedeThread(soquete)
-  redethread.start()
-
-def rede_conectar(param):
-  log("[O] Conectando ativamente com {0}...".format(param[0]))
-  try:
-    soquete = socket.create_connection(param, parametros['timeout'])
-  except:
-    soquete = None
+  # Inicia a thread que irá receber dados
+  recebethread = RecebeDadosThread(soquete)
+  recebethread.start()
   
-  return soquete
+  # Inicia a thread que irá enviar dados
+  enviathread = EnviaDadosThread(soquete, parametros['periodo'])
+  enviathread.start()
 
 # CORPO DO PROGRAMA
 # =================
 if len(sys.argv) > 2:
   args_processar(parametros)
-  rede_iniciar((parametros['ip'], parametros['porta']))
+  distancias = Distancias()
+  enlaces = Enlaces()
+  conexoes_iniciar((parametros['ip'], parametros['porta']))
   if len(parametros['topologia']) > 0:
     comandos = entrada_carregar(parametros['topologia'])
     cmdline_batch(comandos)
