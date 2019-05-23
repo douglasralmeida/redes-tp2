@@ -4,6 +4,7 @@
 # TP2 de Redes
 
 import json
+import queue
 import socket
 import sys 
 import threading
@@ -13,6 +14,10 @@ import time
 # ======================
 EXIBIR_LOG         = True
 MAX_PACOTE         = 65507
+MSG_ATUALIZA       = 0
+MSG_DADOS          = 1
+MSG_RASTREIO       = 2
+MSG_TABELA         = 3
 PORTA              = 55151
 ARGS_INSUFICIENTES = "Erro com o comando {0}. Argumentos insuficientes."
 CMD_NAOENCONTRADO  = "Comando não encontrado: {0}"
@@ -24,7 +29,6 @@ parametros = {'periodo' : 0, 'ip': '127.0.0.1', 'topologia': '', 'porta': 0, 'ti
 distancias = None
 enlaces = None
 enviathread = None
-mensagens = None
 recebethread = None
 rotasthread = None
 
@@ -33,7 +37,7 @@ rotasthread = None
 # Gerencia as distâncias para os demais nós na rede
 class Distancias():
   #modelo dicionario:
-  #distancia = {'prox': '0.0.0.0', 'peso': 0, 'mentor': '0.0.0.0'}
+  #distancia = {'proximo': '0.0.0.0', 'peso': 0, 'mentor': '0.0.0.0'}
   lista = {}
 
   def __init(self):
@@ -47,6 +51,23 @@ class Distancias():
     for (chave, distancia) in self.lista.items():
       print(chave, distancia['peso'], "     ", distancia['proximo'], "  ", distancia['mentor'])
 
+  # elimina da lista de rotas aquelas onde o destino
+  # é o proximo da rota ou o destino de onde a rota
+  # foi aprendida
+  def obterotimizadas(self, ipeliminar):
+    _dist = {}
+    for (chave, distancia) in self.lista.items():
+      #if distancia['proximo'] == ipeliminar:
+      #  continue
+      #if distancia['mentor'] == ipeliminar:
+      #  continue
+      _dist[chave] = distancia['peso']
+
+    return _dist
+
+  def obtertudo(self):
+    return self.lista
+
   def remover(self, ip):
     for (chave, distancia) in self.lista.items():
       if chave == distancia['proximo']:
@@ -59,21 +80,34 @@ class Distancias():
 
 # Thread para Enviar dados
 class EnviaDadosThread(threading.Thread):
+  # MSG_ATUALIZA = 0, MSG_DADOS = 1
+  # MSG_RASTREIO = 2, MSG_TABELA = 3
+
   def __init__(self, soquete):
     threading.Thread.__init__(self)
+    msg = Mensagens(parametros['ip'])
+    self.msgproc = [msg.gerarAtualizacao, msg.gerarDados, msg.gerarRastreio, msg.gerarTabela]
     self.soquete = soquete
+    self.fila = queue.Queue()
     self.ativa = True
     log("\n[+] Nova thread para o envio de dados.")
 
   def desligar(self):
     self.ativa = False
+    
+  def enviar(self, destino, tipo, dados):
+    msg = {'destino': destino, 'conteudo': self.msgproc[tipo](destino, dados)}
+    self.fila.put_nowait(msg)
 
   # enviar dados para o detino especificado
   def run(self):
     while(self.ativa):
       try:
-        endereco = ("127.0.0.1", parametros["porta"])
-        #self.soquete.sendto(dados, endereco)
+        if self.fila.empty() == False:
+          msg = self.fila.get()
+          endereco = (msg['destino'], parametros["porta"])
+          self.soquete.sendto(msg['conteudo'], endereco)
+          log("\n[>] Enviou dados: " + msg['conteudo'].decode())
       except socket.timeout:
         continue
    
@@ -98,6 +132,9 @@ class Enlaces():
     for chave in self.lista.keys():
       print(chave)
 
+  def obtertudo(self):
+    return self.lista.keys()
+
   def remover(self, ip):
     for (chave, enlace) in self.lista.items():
       if chave == ip:
@@ -109,20 +146,50 @@ class Enlaces():
 
 # Gera e processa mensagens no formato JSON
 class Mensagens:
-  def __init__(self):
-    pass
+  def __init__(self, ip):
+    self.origem = ip
     
-  def gerarAtualizacao(self):
-    pass
-  
-  def gerarDados(self):
-    pass
-  
-  def gerarRastreio(self):
-    pass
+  def analisar(self, msg):
+    _dados = json.loads(msg)
+    #continuar aqui
     
-  def gerarTabela(self):
-    pass
+  def gerar(self, destino):
+    _msg = {}
+    _msg["type"] = ""
+    _msg["source"] = self.origem
+    _msg["destination"] = destino
+    
+    return _msg
+    
+  # define que gerar() é um método privado
+  __gerar = gerar
+    
+  def gerarAtualizacao(self, destino, distancias):
+    _msg = self.gerar(destino)
+    _msg["type"] = "update"
+    _msg["distances"] = distancias
+    
+    return json.dumps(_msg).encode()
+  
+  def gerarDados(self, destino, conteudo):
+    _msg = self.gerar(destino)
+    _msg["type"] = "data"
+    _msg["payload"] = conteudo
+
+    return json.dumps(_msg).encode()
+  
+  def gerarRastreio(self, destino, rastro):
+    _msg = self.gerar(destino)
+    _msg["type"] = "trace"
+    _msg["hops"] = rastro
+
+    return json.dumps(_msg).encode()
+    
+  def gerarTabela(self, destino, conteudo):
+    _msg = self.gerar(destino)
+    _msg["type"] = "table"
+
+    return json.dumps(_msg).encode()
 
 # Thread para Receber dados
 class RecebeDadosThread(threading.Thread):
@@ -144,9 +211,9 @@ class RecebeDadosThread(threading.Thread):
         break
       if dados == '':
         break
-      if not self.escutarrede:
+      if not self.ativa:
         break
-      onrecv(dados)
+      self.onrecv(dados.decode())
     log("\n[-] Encerrando thread de recebimento de dados.")
     self.soquete.close()
 
@@ -154,6 +221,7 @@ class RecebeDadosThread(threading.Thread):
     self.ativa = False
     
   def onrecv(self, dados):
+    dadosjson = json.loads(dados)
     log("\n[>] Recebeu dados: " + dados)
 
 # Thread para gerar rotas atualizadas
@@ -166,11 +234,15 @@ class RotasAtualizadasThread(threading.Thread):
 
   def desligar(self):
     self.ativa = False
-
+    
   # gera a msg de rotas atualizadas a cada intevalo de tempo
   def run(self):
     while(self.ativa):
-        time.sleep(self.intervalo)
+      destinos = enlaces.obtertudo()
+      for d in destinos:
+        dist = distancias.obterotimizadas(d)
+        enviathread.enviar(d, MSG_ATUALIZA, dist)
+      time.sleep(self.intervalo)
    
     # desligando...
     log("\n[-] Encerrando thread de geração de rotas atualizadas.")
@@ -314,7 +386,6 @@ if len(sys.argv) > 2:
   args_processar(parametros)
   distancias = Distancias()
   enlaces = Enlaces()
-  mensagens = Mensagens()
   conexoes_iniciar((parametros['ip'], parametros['porta']))
   rotasthread = RotasAtualizadasThread(parametros['periodo'])
   rotasthread.start()
