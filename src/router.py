@@ -29,6 +29,7 @@ parametros = {'periodo' : 0, 'ip': '127.0.0.1', 'topologia': '', 'porta': 0, 'ti
 distancias = None
 enlaces = None
 enviathread = None
+processathread = None
 recebethread = None
 rotasthread = None
 
@@ -90,7 +91,6 @@ class EnviaDadosThread(threading.Thread):
     self.soquete = soquete
     self.fila = queue.Queue()
     self.ativa = True
-    log("\n[+] Nova thread para o envio de dados.")
 
   def desligar(self):
     self.ativa = False
@@ -103,16 +103,18 @@ class EnviaDadosThread(threading.Thread):
   def run(self):
     while(self.ativa):
       try:
-        if self.fila.empty() == False:
-          msg = self.fila.get()
-          endereco = (msg['destino'], parametros["porta"])
-          self.soquete.sendto(msg['conteudo'], endereco)
-          log("\n[>] Enviou dados: " + msg['conteudo'].decode())
+        msg = self.fila.get(True, 2)
+      except queue.Empty:
+        continue
+      endereco = (msg['destino'], parametros["porta"])
+      try:
+        self.soquete.sendto(msg['conteudo'], endereco)
+        self.fila.task_done()
+#        log("\n[>] Enviou dados: " + msg['conteudo'].decode())
       except socket.timeout:
         continue
    
     # desconectando...
-    log("\n[-] Encerrando thread de envio de dados.")
     self.soquete.close()        
 
 # Gerencia os enlaces na rede
@@ -150,8 +152,9 @@ class Mensagens:
     self.origem = ip
     
   def analisar(self, msg):
-    _dados = json.loads(msg)
-    #continuar aqui
+    _dados = json.loads(msg.decode())
+    
+    return _dados
     
   def gerar(self, destino):
     _msg = {}
@@ -190,7 +193,31 @@ class Mensagens:
     _msg["type"] = "table"
 
     return json.dumps(_msg).encode()
+    
+# Thread para Processar os dados recebidos
+class ProcessaDadosThread(threading.Thread):
+  def __init__(self):
+    threading.Thread.__init__(self)
+    self.ativa = True
+    self.fila = queue.Queue()
+    self.msgs = Mensagens(parametros['ip'])
 
+  def desligar(self):
+    self.ativa = False
+    
+  def processar(self, msg):
+    dado = self.msgs.analisar(msg)
+    self.fila.put_nowait(dado)
+
+  def run(self):
+    while self.ativa:
+      try:
+        dado = self.fila.get(True, 2)
+      except (queue.Empty):
+        continue
+      log("Processar: ", dado)
+      self.fila.task_done()
+    
 # Thread para Receber dados
 class RecebeDadosThread(threading.Thread):
   def __init__(self, soquete):
@@ -198,7 +225,6 @@ class RecebeDadosThread(threading.Thread):
     self.ativa = True
     self.soquete = soquete
     self.soquete.settimeout(1)
-    log("\n[+] Nova thread para o recebimento de dados.")
 
   # manipular o soquete para receber dados e enviar para processamento
   def run(self):
@@ -213,16 +239,15 @@ class RecebeDadosThread(threading.Thread):
         break
       if not self.ativa:
         break
-      self.onrecv(dados.decode())
-    log("\n[-] Encerrando thread de recebimento de dados.")
+      self.onrecv(dados)
     self.soquete.close()
 
   def desligar(self):
     self.ativa = False
     
   def onrecv(self, dados):
-    dadosjson = json.loads(dados)
-    log("\n[>] Recebeu dados: " + dados)
+    processathread.processar(dados)
+#    log("\n[>] Recebeu dados: " + dados.decode())
 
 # Thread para gerar rotas atualizadas
 class RotasAtualizadasThread(threading.Thread):
@@ -230,7 +255,6 @@ class RotasAtualizadasThread(threading.Thread):
     threading.Thread.__init__(self)
     self.intervalo = intervalo
     self.ativa = True    
-    log("\n[+] Nova thread para geração de rotas atualizadas.")
 
   def desligar(self):
     self.ativa = False
@@ -242,11 +266,8 @@ class RotasAtualizadasThread(threading.Thread):
       for d in destinos:
         dist = distancias.obterotimizadas(d)
         enviathread.enviar(d, MSG_ATUALIZA, dist)
-      time.sleep(self.intervalo)
-   
+      time.sleep(self.intervalo)   
     # desligando...
-    log("\n[-] Encerrando thread de geração de rotas atualizadas.")
-
 
 # FUNCOES DO PROGRAMA
 # ===================
@@ -353,6 +374,8 @@ def app_sair():
   distancias.removertudo()
   rotasthread.desligar()
   rotasthread.join()
+  processathread.desligar()
+  processathread.join()
   recebethread.desligar()
   recebethread.join()
   enviathread.desligar()
@@ -386,6 +409,8 @@ if len(sys.argv) > 2:
   args_processar(parametros)
   distancias = Distancias()
   enlaces = Enlaces()
+  processathread = ProcessaDadosThread()
+  processathread.start()
   conexoes_iniciar((parametros['ip'], parametros['porta']))
   rotasthread = RotasAtualizadasThread(parametros['periodo'])
   rotasthread.start()
