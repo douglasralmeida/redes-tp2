@@ -150,10 +150,13 @@ class Enlaces():
 class Mensagens:
   def __init__(self, ip):
     self.origem = ip
+    self.tipo = {'update': 0, 'data': 1, 'trace': 3, 'table': 4}
     
-  def analisar(self, msg):
+  def analisar(self, dado):
+    print(self.tipo[dado["type"]])
+
+  def converter(self, msg):
     _dados = json.loads(msg.decode())
-    
     return _dados
     
   def gerar(self, destino):
@@ -206,7 +209,7 @@ class ProcessaDadosThread(threading.Thread):
     self.ativa = False
     
   def processar(self, msg):
-    dado = self.msgs.analisar(msg)
+    dado = self.msgs.converter(msg)
     self.fila.put_nowait(dado)
 
   def run(self):
@@ -215,7 +218,7 @@ class ProcessaDadosThread(threading.Thread):
         dado = self.fila.get(True, 2)
       except (queue.Empty):
         continue
-      log("Processar: ", dado)
+      self.msgs.analisar(dado)
       self.fila.task_done()
     
 # Thread para Receber dados
