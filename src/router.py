@@ -99,6 +99,10 @@ class EnviaDadosThread(threading.Thread):
     msg = {'destino': destino, 'conteudo': self.msgproc[tipo](destino, dados)}
     self.fila.put_nowait(msg)
 
+  def repassar(self, msg):
+    msg = {'destino': msg["destination"], 'conteudo': msg}
+    self.fila.put_nowait()
+
   # enviar dados para o detino especificado
   def run(self):
     while(self.ativa):
@@ -106,7 +110,7 @@ class EnviaDadosThread(threading.Thread):
         msg = self.fila.get(True, 2)
       except queue.Empty:
         continue
-      endereco = (msg['destino'], parametros["porta"])
+      endereco = (msg["destino"], parametros["porta"])
       try:
         self.soquete.sendto(msg['conteudo'], endereco)
         self.fila.task_done()
@@ -149,16 +153,25 @@ class Enlaces():
 # Gera e processa mensagens no formato JSON
 class Mensagens:
   def __init__(self, ip):
+    self.anaproc = [self.gerarAtualizacao]
     self.origem = ip
     self.tipo = {'update': 0, 'data': 1, 'trace': 3, 'table': 4}
     
   def analisar(self, dado):
-    print(self.tipo[dado["type"]])
+    _destino = dado["destination"]
+    if _destino == parametros["ip"]:
+      _tipo = self.tipo[dado["type"]]
+      _self.anaproc[_tipo](dado)
+    else:
+      enviathread.repassar(json.dumps(dado).encode())
+
+  def analisarAtualizacao(self, dado):
+    _origem = dado["source"]
 
   def converter(self, msg):
     _dados = json.loads(msg.decode())
     return _dados
-    
+  
   def gerar(self, destino):
     _msg = {}
     _msg["type"] = ""
