@@ -38,49 +38,68 @@ rotasthread = None
 # Gerencia as distâncias para os demais nós na rede
 class Distancias():
   #modelo dicionario:
-  #distancia = {'proximo': '0.0.0.0', 'peso': 0, 'mentor': '0.0.0.0'}
+  #distancia = {'proximos': '[lista], 'peso': 0, 'proxid': 0}
   lista = {}
 
   def __init(self):
     pass
-    
-  def adicionar(self, ip, proximo, peso, mentor):
-    dist = {'proximo': proximo, 'peso': peso, 'mentor': mentor}
+
+  # adiciona uma rota à lista de rotas conhecidas
+  def adicionar(self, ip, proximo, peso):
+    dist = {'proximos': [proximo], 'peso': peso, 'proxid': 0}
     if ip in self.lista.keys():
       if self.lista[ip]['peso'] > peso:
         self.lista[ip] = dist
+      else if self.lista[ip]['peso'] == peso:
+        self.lista[ip]['proximos'].append(proximo)
     else:
       self.lista[ip] = dist
     
   def exibir(self):
     for (c, dist) in self.lista.items():
-      print(c, dist['peso'], "     ", dist['proximo'], "  ", dist['mentor'])
+      for prox in dist['proximos']:
+        print(c, dist['peso'], "     ", prox)
 
   # elimina da lista de rotas aquelas onde o destino
-  # é o proximo da rota ou o destino de onde a rota
-  # foi aprendida
+  # é o proximo da rota ou é a origem de de onde
+  #  a rota foi aprendida
   def obterotimizadas(self, ipeliminar):
     #ip: peso
     dist2 = {}
     for (c, dist) in self.lista.items():
-      if ipeliminar == dist['proximo']:
-        continue
-      if ipeliminar == dist['mentor']:
-        continue
       if ipeliminar == c:
         continue
-      dist2[c] = dist['peso']
+      for prox in dist['proximos']:
+        if ipeliminar == prox:
+          continue
+        dist2[c] = dist['peso']
+
+    #adicionar a rota para ele mesmo
+    dist2[parametros["ip"]] = 0
 
     return dist2
 
-  def obtertudo(self):
-    return self.lista
+  # retorna quem é o próximo da rota para o 
+  # ip especificado  usando balanceamento de carga
+  def obterproximo(self, ip):
+    for (c, dist) in self.lista.items():
+      if ip == c:
+        quant = len(dist['proximos'])
+        i = randrange(quant)
+        
+        return dist['proximos'][i]
+
+    return None;
 
   def remover(self, ip):
     for (c, dist) in self.lista.items():
-      if c == dist['proximo']:
+      for prox in dist['proximos']:
+        if ip == prox:
+          del prox
+          break
+      if len(dist['proximos']) == 0:
         del dist
-    #comando para recalcular distancias onde o proximo é o ip removido
+        recalcular(self, c)
 
   def removertudo(self):
     for dist in self.lista.values():
@@ -88,8 +107,6 @@ class Distancias():
 
 # Thread para Enviar dados
 class EnviaDadosThread(threading.Thread):
-  # MSG_ATUALIZA = 0, MSG_DADOS = 1
-  # MSG_RASTREIO = 2, MSG_TABELA = 3
   msg = None
 
   def __init__(self, soquete):
@@ -107,9 +124,11 @@ class EnviaDadosThread(threading.Thread):
     pac = {'destino': destino, 'conteudo': self.msgsproc[tipo](destino, conteudo)}
     self.fila.put_nowait(pac)
 
-  def repassar(self, mensagem):
-    pac = {'destino': mensagem["destination"], 'conteudo': mensagem}
-    self.fila.put_nowait(pac)
+  def repassar(self, destino, mensagem):
+    prox = distancias.obterproximo(destino)
+    if prox != None:
+      pac = {'destino': prox, 'conteudo': mensagem}
+      self.fila.put_nowait(pac)
 
   # enviar dados para o detino especificado
   def run(self):
@@ -161,27 +180,32 @@ class Enlaces():
 # Gera e processa mensagens no formato JSON
 class Mensagens:
   def __init__(self, ip):
-    self.anaproc = [self.analisarAtualizacao]
+    self.anaproc = {'update': self.analisarAtualizacao,
+                    'data': self.analisarDados,
+                    'trace': 0,
+                    'table': 0}
     self.origem = ip
-    self.tipo = {'update': 0, 'data': 1, 'trace': 3, 'table': 4}
     
   def analisar(self, mensagem):
     dest = mensagem["destination"]
     if dest == parametros["ip"]:
-      tipo = self.tipo[mensagem["type"]]
-      self.anaproc[tipo](mensagem)
+      analisarproc = self.anaproc[mensagem["type"]]
+      analisarproc(mensagem)
     else:
-      enviathread.repassar(json.dumps(mensagem).encode())
+      enviathread.repassar(dest, json.dumps(mensagem).encode())
 
   def analisarAtualizacao(self, mensagem):
-    #distancia = {'proximo': '0.0.0.0', 'peso': 0, 'mentor': '0.0.0.0'}
-    mentor = mensagem["source"]
+    #distancia = {'proximo': '0.0.0.0', 'peso': 0}
+    prox = mensagem["source"]
     dists = mensagem["distances"]
     for (c, p) in dists.items():
       ip = c
       peso = int(p) + 1 
-      prox = mentor
-      distancias.adicionar(ip, prox, peso, mentor)
+      distancias.adicionar(ip, prox, peso)
+  
+  def analisarDados(self, mensagem):
+    dados = mensagem["payload"]
+    print(dados)
 
   def converter(self, mensagem):
     msg = json.loads(mensagem.decode())
@@ -237,7 +261,7 @@ class ProcessaDadosThread(threading.Thread):
 
   def desligar(self):
     self.ativa = False
-    
+
   def processar(self, mensagem):
     msg = self.msgs.converter(mensagem)
     self.fila.put_nowait(msg)
