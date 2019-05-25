@@ -45,49 +45,57 @@ class Distancias():
     pass
     
   def adicionar(self, ip, proximo, peso, mentor):
-    distancia = {'proximo': proximo, 'peso': peso, 'mentor': mentor}
-    self.lista[ip] = distancia
+    dist = {'proximo': proximo, 'peso': peso, 'mentor': mentor}
+    if ip in self.lista.keys():
+      if self.lista[ip]['peso'] > peso:
+        self.lista[ip] = dist
+    else:
+      self.lista[ip] = dist
     
   def exibir(self):
-    for (chave, distancia) in self.lista.items():
-      print(chave, distancia['peso'], "     ", distancia['proximo'], "  ", distancia['mentor'])
+    for (c, dist) in self.lista.items():
+      print(c, dist['peso'], "     ", dist['proximo'], "  ", dist['mentor'])
 
   # elimina da lista de rotas aquelas onde o destino
   # é o proximo da rota ou o destino de onde a rota
   # foi aprendida
   def obterotimizadas(self, ipeliminar):
-    _dist = {}
-    for (chave, distancia) in self.lista.items():
-      #if distancia['proximo'] == ipeliminar:
-      #  continue
-      #if distancia['mentor'] == ipeliminar:
-      #  continue
-      _dist[chave] = distancia['peso']
+    #ip: peso
+    dist2 = {}
+    for (c, dist) in self.lista.items():
+      if ipeliminar == dist['proximo']:
+        continue
+      if ipeliminar == dist['mentor']:
+        continue
+      if ipeliminar == c:
+        continue
+      dist2[c] = dist['peso']
 
-    return _dist
+    return dist2
 
   def obtertudo(self):
     return self.lista
 
   def remover(self, ip):
-    for (chave, distancia) in self.lista.items():
-      if chave == distancia['proximo']:
-        del distancia
+    for (c, dist) in self.lista.items():
+      if c == dist['proximo']:
+        del dist
     #comando para recalcular distancias onde o proximo é o ip removido
 
   def removertudo(self):
-    for distancia in self.lista.values():
-      del distancia
+    for dist in self.lista.values():
+      del dist
 
 # Thread para Enviar dados
 class EnviaDadosThread(threading.Thread):
   # MSG_ATUALIZA = 0, MSG_DADOS = 1
   # MSG_RASTREIO = 2, MSG_TABELA = 3
+  msg = None
 
   def __init__(self, soquete):
     threading.Thread.__init__(self)
     msg = Mensagens(parametros['ip'])
-    self.msgproc = [msg.gerarAtualizacao, msg.gerarDados, msg.gerarRastreio, msg.gerarTabela]
+    self.msgsproc = [msg.gerarAtualizacao, msg.gerarDados, msg.gerarRastreio, msg.gerarTabela]
     self.soquete = soquete
     self.fila = queue.Queue()
     self.ativa = True
@@ -95,24 +103,24 @@ class EnviaDadosThread(threading.Thread):
   def desligar(self):
     self.ativa = False
     
-  def enviar(self, destino, tipo, dados):
-    msg = {'destino': destino, 'conteudo': self.msgproc[tipo](destino, dados)}
-    self.fila.put_nowait(msg)
+  def enviar(self, destino, tipo, conteudo):
+    pac = {'destino': destino, 'conteudo': self.msgsproc[tipo](destino, conteudo)}
+    self.fila.put_nowait(pac)
 
-  def repassar(self, msg):
-    msg = {'destino': msg["destination"], 'conteudo': msg}
-    self.fila.put_nowait()
+  def repassar(self, mensagem):
+    pac = {'destino': mensagem["destination"], 'conteudo': mensagem}
+    self.fila.put_nowait(pac)
 
   # enviar dados para o detino especificado
   def run(self):
     while(self.ativa):
       try:
-        msg = self.fila.get(True, 2)
+        pac = self.fila.get(True, 2)
       except queue.Empty:
         continue
-      endereco = (msg["destino"], parametros["porta"])
+      endereco = (pac["destino"], parametros["porta"])
       try:
-        self.soquete.sendto(msg['conteudo'], endereco)
+        self.soquete.sendto(pac['conteudo'], endereco)
         self.fila.task_done()
 #        log("\n[>] Enviou dados: " + msg['conteudo'].decode())
       except socket.timeout:
@@ -135,15 +143,15 @@ class Enlaces():
     self.lista[ip] = enlace
     
   def exibir(self):
-    for chave in self.lista.keys():
-      print(chave)
+    for c in self.lista.keys():
+      print(c)
 
   def obtertudo(self):
     return self.lista.keys()
 
   def remover(self, ip):
-    for (chave, enlace) in self.lista.items():
-      if chave == ip:
+    for (c, enlace) in self.lista.items():
+      if c == ip:
         del enlace
 
   def removertudo(self):
@@ -153,62 +161,71 @@ class Enlaces():
 # Gera e processa mensagens no formato JSON
 class Mensagens:
   def __init__(self, ip):
-    self.anaproc = [self.gerarAtualizacao]
+    self.anaproc = [self.analisarAtualizacao]
     self.origem = ip
     self.tipo = {'update': 0, 'data': 1, 'trace': 3, 'table': 4}
     
-  def analisar(self, dado):
-    _destino = dado["destination"]
-    if _destino == parametros["ip"]:
-      _tipo = self.tipo[dado["type"]]
-      _self.anaproc[_tipo](dado)
+  def analisar(self, mensagem):
+    dest = mensagem["destination"]
+    if dest == parametros["ip"]:
+      tipo = self.tipo[mensagem["type"]]
+      self.anaproc[tipo](mensagem)
     else:
-      enviathread.repassar(json.dumps(dado).encode())
+      enviathread.repassar(json.dumps(mensagem).encode())
 
-  def analisarAtualizacao(self, dado):
-    _origem = dado["source"]
+  def analisarAtualizacao(self, mensagem):
+    #distancia = {'proximo': '0.0.0.0', 'peso': 0, 'mentor': '0.0.0.0'}
+    mentor = mensagem["source"]
+    dists = mensagem["distances"]
+    for (c, p) in dists.items():
+      ip = c
+      peso = int(p) + 1 
+      prox = mentor
+      distancias.adicionar(ip, prox, peso, mentor)
 
-  def converter(self, msg):
-    _dados = json.loads(msg.decode())
-    return _dados
+  def converter(self, mensagem):
+    msg = json.loads(mensagem.decode())
+
+    return msg
   
   def gerar(self, destino):
-    _msg = {}
-    _msg["type"] = ""
-    _msg["source"] = self.origem
-    _msg["destination"] = destino
+    msg = {}
+    msg["type"] = ""
+    msg["source"] = self.origem
+    msg["destination"] = destino
     
-    return _msg
+    return msg
     
   # define que gerar() é um método privado
   __gerar = gerar
     
   def gerarAtualizacao(self, destino, distancias):
-    _msg = self.gerar(destino)
-    _msg["type"] = "update"
-    _msg["distances"] = distancias
+    msg = self.gerar(destino)
+    msg["type"] = "update"
+    msg["distances"] = distancias
     
-    return json.dumps(_msg).encode()
+    return json.dumps(msg).encode()
   
-  def gerarDados(self, destino, conteudo):
-    _msg = self.gerar(destino)
-    _msg["type"] = "data"
-    _msg["payload"] = conteudo
+  def gerarDados(self, destino, dados):
+    msg = self.gerar(destino)
+    msg["type"] = "data"
+    msg["payload"] = dados
 
-    return json.dumps(_msg).encode()
+    return json.dumps(msg).encode()
   
   def gerarRastreio(self, destino, rastro):
-    _msg = self.gerar(destino)
-    _msg["type"] = "trace"
-    _msg["hops"] = rastro
+    msg = self.gerar(destino)
+    msg["type"] = "trace"
+    msg["hops"] = rastro
 
-    return json.dumps(_msg).encode()
+    return json.dumps(msg).encode()
     
-  def gerarTabela(self, destino, conteudo):
-    _msg = self.gerar(destino)
-    _msg["type"] = "table"
+  def gerarTabela(self, destino, tabela):
+    msg = self.gerar(destino)
+    msg["type"] = "table"
+    print("ops!")
 
-    return json.dumps(_msg).encode()
+    return json.dumps(msg).encode()
     
 # Thread para Processar os dados recebidos
 class ProcessaDadosThread(threading.Thread):
@@ -221,17 +238,17 @@ class ProcessaDadosThread(threading.Thread):
   def desligar(self):
     self.ativa = False
     
-  def processar(self, msg):
-    dado = self.msgs.converter(msg)
-    self.fila.put_nowait(dado)
+  def processar(self, mensagem):
+    msg = self.msgs.converter(mensagem)
+    self.fila.put_nowait(msg)
 
   def run(self):
     while self.ativa:
       try:
-        dado = self.fila.get(True, 2)
+        msg = self.fila.get(True, 2)
       except (queue.Empty):
         continue
-      self.msgs.analisar(dado)
+      self.msgs.analisar(msg)
       self.fila.task_done()
     
 # Thread para Receber dados
@@ -246,23 +263,23 @@ class RecebeDadosThread(threading.Thread):
   def run(self):
     while self.ativa:
       try:
-        dados, (ip, porta) = self.soquete.recvfrom(MAX_PACOTE)
+        cont, (ip, porta) = self.soquete.recvfrom(MAX_PACOTE)
       except (socket.timeout, OSError):
         continue
-      if not dados:
+      if not cont:
         break
-      if dados == '':
+      if cont == '':
         break
       if not self.ativa:
         break
-      self.onrecv(dados)
+      self.onrecv(cont)
     self.soquete.close()
 
   def desligar(self):
     self.ativa = False
     
-  def onrecv(self, dados):
-    processathread.processar(dados)
+  def onrecv(self, msg):
+    processathread.processar(msg)
 #    log("\n[>] Recebeu dados: " + dados.decode())
 
 # Thread para gerar rotas atualizadas
@@ -278,11 +295,11 @@ class RotasAtualizadasThread(threading.Thread):
   # gera a msg de rotas atualizadas a cada intevalo de tempo
   def run(self):
     while(self.ativa):
-      destinos = enlaces.obtertudo()
-      for d in destinos:
+      dests = enlaces.obtertudo()
+      for d in dests:
         dist = distancias.obterotimizadas(d)
         enviathread.enviar(d, MSG_ATUALIZA, dist)
-      time.sleep(self.intervalo)   
+      time.sleep(self.intervalo)
     # desligando...
 
 # FUNCOES DO PROGRAMA
@@ -308,16 +325,17 @@ def args_processar(parametros):
 # Carrega um arquivo somente-texto e o quebra em linhas
 #   nomearquivo = nome do arquivo a ser carregado
 def entrada_carregar(nomearquivo):
-  arquivo = open(nomearquivo, "r")
-  linhas = arquivo.read().splitlines()
-  for linha in linhas:
-    yield linha
+  arq = open(nomearquivo, "r")
+  lins = arq.read().splitlines()
+  for l in lins:
+    yield l
 
 # -----------------------------------------
 def cmd_add(args):
   if len(args) > 2:
     ip = args[1]
-    distancias.adicionar(ip, ip, args[2], parametros['ip'])
+    peso = int(args[2])
+    distancias.adicionar(ip, ip, peso, parametros['ip'])
     enlaces.adicionar(ip)
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
@@ -363,11 +381,11 @@ def cmdline_batch(cmds):
     cmdline_executar(cmd)
 
 def cmdline_executar(cmd):
-  cmd_args = cmd.split(' ')
-  if cmd_args[0] in cmds_disponiveis.keys():
-    cmds_disponiveis[cmd_args[0]](cmd_args)
+  args = cmd.split(' ')
+  if args[0] in cmds_disponiveis.keys():
+    cmds_disponiveis[args[0]](args)
   else:
-    print(CMD_NAOENCONTRADO.format(cmd_args[0]))
+    print(CMD_NAOENCONTRADO.format(args[0]))
 
 def cmdline_obter():
   s = ''
@@ -404,19 +422,19 @@ def conexoes_iniciar(param):
   global recebethread
   
   # Cria um soquete para comunicação externa
-  soquete = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  soq = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
   # Para evitar a exceção "address already in use",
   # desligar esse comportamento com uma opção da API de soquetes:
-  soquete.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-  soquete.bind(param)
+  soq.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+  soq.bind(param)
 
   # Inicia a thread que irá receber dados
-  recebethread = RecebeDadosThread(soquete)
+  recebethread = RecebeDadosThread(soq)
   recebethread.start()
   
   # Inicia a thread que irá enviar dados
-  enviathread = EnviaDadosThread(soquete)
+  enviathread = EnviaDadosThread(soq)
   enviathread.start()
 
 # CORPO DO PROGRAMA
@@ -431,7 +449,7 @@ if len(sys.argv) > 2:
   rotasthread = RotasAtualizadasThread(parametros['periodo'])
   rotasthread.start()
   if len(parametros['topologia']) > 0:
-    comandos = entrada_carregar(parametros['topologia'])
-    cmdline_batch(comandos)
-  cmd = cmdline_manipular()
+    coms = entrada_carregar(parametros['topologia'])
+    cmdline_batch(coms)
+  cmdline_manipular()
   app_sair()
