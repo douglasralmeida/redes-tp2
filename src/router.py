@@ -5,6 +5,7 @@
 
 import json
 import queue
+import random
 import socket
 import sys 
 import threading
@@ -19,8 +20,9 @@ MSG_DADOS          = 1
 MSG_RASTREIO       = 2
 MSG_TABELA         = 3
 PORTA              = 55151
-ARGS_INSUFICIENTES = "Erro com o comando {0}. Argumentos insuficientes."
+ARGS_INSUFICIENTES = "Erro com o comando {0}: Argumentos insuficientes."
 CMD_NAOENCONTRADO  = "Comando não encontrado: {0}"
+ROTA_NAOCONHECIDA  = "Erro: Uma rota para {0} não é conhecida."
 PROMPT             = "$ "
 
 # VARIÁVEIS DO PROGRAMA
@@ -35,118 +37,159 @@ rotasthread = None
 
 # CLASSES DO PROGRAMA
 # ===================
-# Gerencia as distâncias para os demais nós na rede
+# Armazena uma rota conhecida com o seu peso
+class Rota():
+  # Construtor da classe
+  def __init__ (self, prox, peso):
+    self.peso = peso
+    self.prox = prox
+
+  # Testes de igualdade
+  def __eq__(self, outro):
+    return  isinstance(outro, Rota) and self.prox == outro.prox
+
+  def __hash__(self):
+    return hash(self.prox)
+
+  # representação em string
+  def __repr__(self):
+    return repr((self.prox, self.peso))
+
+  # formata em string para exibição
+  def __str__(self):
+    return str(self.peso) + "     " + str(self.prox)
+
+# Gerencia todas as rotas conhecidas para um nó
+# na rede, ordenando-as a partir da menor
+class Rotas():
+  index = 0
+  lista = list()
+
+  # Construtor da classe
+  def __init__(self):
+    pass
+
+  # Interador sobre a lista de rotas
+  def __iter__(self):
+    return self
+
+  def __len__(self):
+    return length(self.lista)
+
+  def __next__(self):
+    if self.index == len(self.lista):
+      raise StopIteration
+    self.index = self.index + 1
+    
+    return self.lista[self.index-1]
+
+  # representação em string
+  def __repr__(self):
+    return repr(self.lista)
+
+  # formata em string para exibição
+  def __str__(self):
+    primeiro = self.lista[0]    
+    return "{0: <5} {1}".format(primeiro.peso, primeiro.prox)
+
+  # Adiciona uma rota conhecida na lista
+  def adicionar(self, rota):
+    i = 0
+    for r in self.lista:
+      if r.peso < rota.peso:
+        i = i + 1
+      else:
+        break
+    self.lista.insert(i, rota)
+
+  # Atualiza uma rota conhecida na lista
+  def atualizar(self, rota):
+    for r in self.lista:
+      if r == rota and r.peso != rota.peso:
+        self.lista.remove(r)
+        self.adicionar(rota)
+        break
+
+  def obtermelhoresrotas(self):
+    menorpeso = self.lista[0].peso
+    melhoresrotas = list()
+    for r in self.lista:
+      if r.peso == menorpeso:
+        melhoresrotas.append(r)
+      else:
+        break
+
+    return melhoresrotas
+
+  # Remove todas as rotas conhecidas
+  # na lista onde o proximo é o ip
+  # especificado
+  def remover(self, prox):
+    for r in self.lista:
+      if r.prox == prox:
+        self.lista.remove(r)
+
+# Todas as rotas conhecidas na rede
 class Distancias():
   #modelo dicionario:
-  #distancia = {'proximos': '[lista], 'peso': 0, 'proxid': 0}
-  lista = {}
+  #rotas = {'ip': Rotas()}
+  rotas = dict()
 
   def __init(self):
     pass
 
   # adiciona uma rota à lista de rotas conhecidas
   def adicionar(self, ip, proximo, peso):
-    dist = {'proximos': [proximo], 'peso': peso, 'proxid': 0}
-    if ip in self.lista.keys():
-      if self.lista[ip]['peso'] > peso:
-        self.lista[ip] = dist
-      else if self.lista[ip]['peso'] == peso:
-        self.lista[ip]['proximos'].append(proximo)
+    rota = Rota(proximo, peso)
+    if not ip in self.rotas:
+      self.rotas[ip] = Rotas()
+      self.rotas[ip].adicionar(rota)
     else:
-      self.lista[ip] = dist
-    
+      if rota in self.rotas[ip]:
+        self.rotas[ip].atualizar(rota)
+      else:
+        self.rotas[ip].adicionar(rota)    
+
   def exibir(self):
-    for (c, dist) in self.lista.items():
-      for prox in dist['proximos']:
-        print(c, dist['peso'], "     ", prox)
+    for (c, rotas) in self.rotas.items():
+      print("{0: <15} {1}".format(c, rotas))
+      #print("%15s" % c, rotas)
 
   # elimina da lista de rotas aquelas onde o destino
-  # é o proximo da rota ou é a origem de de onde
+  # é o proximo da rota ou é a origem de onde
   #  a rota foi aprendida
-  def obterotimizadas(self, ipeliminar):
+  def obterpesos(self, ip):
     #ip: peso
-    dist2 = {}
-    for (c, dist) in self.lista.items():
-      if ipeliminar == c:
+    pesos = {}
+    for (c, rotas) in self.rotas.items():
+      if ip == c:
         continue
-      for prox in dist['proximos']:
-        if ipeliminar == prox:
-          continue
-        dist2[c] = dist['peso']
+      rota = rotas.obtermelhoresrotas()[0]
+      if ip == rota.prox:
+        continue
+      pesos[c] = rota.peso
 
     #adicionar a rota para ele mesmo
-    dist2[parametros["ip"]] = 0
+    pesos[parametros["ip"]] = 0
 
-    return dist2
+    return pesos
 
   # retorna quem é o próximo da rota para o 
-  # ip especificado  usando balanceamento de carga
+  # ip especificado usando balanceamento de carga
   def obterproximo(self, ip):
-    for (c, dist) in self.lista.items():
-      if ip == c:
-        quant = len(dist['proximos'])
-        i = randrange(quant)
-        
-        return dist['proximos'][i]
-
-    return None;
-
-  def remover(self, ip):
-    for (c, dist) in self.lista.items():
-      for prox in dist['proximos']:
-        if ip == prox:
-          del prox
-          break
-      if len(dist['proximos']) == 0:
-        del dist
-        recalcular(self, c)
-
-  def removertudo(self):
-    for dist in self.lista.values():
-      del dist
-
-# Thread para Enviar dados
-class EnviaDadosThread(threading.Thread):
-  msg = None
-
-  def __init__(self, soquete):
-    threading.Thread.__init__(self)
-    msg = Mensagens(parametros['ip'])
-    self.msgsproc = [msg.gerarAtualizacao, msg.gerarDados, msg.gerarRastreio, msg.gerarTabela]
-    self.soquete = soquete
-    self.fila = queue.Queue()
-    self.ativa = True
-
-  def desligar(self):
-    self.ativa = False
-    
-  def enviar(self, destino, tipo, conteudo):
-    pac = {'destino': destino, 'conteudo': self.msgsproc[tipo](destino, conteudo)}
-    self.fila.put_nowait(pac)
-
-  def repassar(self, destino, mensagem):
-    prox = distancias.obterproximo(destino)
-    if prox != None:
-      pac = {'destino': prox, 'conteudo': mensagem}
-      self.fila.put_nowait(pac)
-
-  # enviar dados para o detino especificado
-  def run(self):
-    while(self.ativa):
-      try:
-        pac = self.fila.get(True, 2)
-      except queue.Empty:
-        continue
-      endereco = (pac["destino"], parametros["porta"])
-      try:
-        self.soquete.sendto(pac['conteudo'], endereco)
-        self.fila.task_done()
-#        log("\n[>] Enviou dados: " + msg['conteudo'].decode())
-      except socket.timeout:
-        continue
-   
-    # desconectando...
-    self.soquete.close()        
+    if ip in self.rotas.keys():
+      rotas = self.rotas[ip].obtermelhoresrotas()
+      quant = len(rotas)
+      i = random.randrange(quant)
+      return rotas[i].prox
+    else:
+      return None
+  
+  def removerproximo(self, ip):
+    for (c, rotas) in self.rotas.items():
+      rotas.remover(ip)
+      if len(rotas) == 0:
+        del rotas
 
 # Gerencia os enlaces na rede
 class Enlaces():
@@ -177,13 +220,63 @@ class Enlaces():
     for enlace in self.lista.values():
       del enlace
 
+# Thread para Enviar dados
+class EnviaDadosThread(threading.Thread):
+  msg = None
+
+  def __init__(self, soquete):
+    threading.Thread.__init__(self)
+    msg = Mensagens(parametros['ip'])
+    self.msgsproc = [msg.gerarAtualizacao, msg.gerarDados, msg.gerarRastreio, msg.gerarTabela]
+    self.soquete = soquete
+    self.fila = queue.Queue()
+    self.ativa = True
+
+  def desligar(self):
+    self.ativa = False
+
+  def enviar(self, destino, tipo, conteudo):
+    ip = distancias.obterproximo(destino)
+    if ip != None:
+      pac = {'destino': ip, 'conteudo': self.msgsproc[tipo](destino, conteudo)}
+      self.fila.put_nowait(pac)
+      return True
+    else:
+      return False
+
+  def repassar(self, destino, mensagem):
+    ip = distancias.obterproximo(destino)
+    if ip != None:
+      pac = {'destino': ip, 'conteudo': mensagem}
+      self.fila.put_nowait(pac)
+      return True
+    else:
+      return False
+
+  # enviar dados para o detino especificado
+  def run(self):
+    while(self.ativa):
+      try:
+        pac = self.fila.get(True, 1)
+      except queue.Empty:
+        continue
+      endereco = (pac["destino"], parametros["porta"])
+      try:
+        self.soquete.sendto(pac['conteudo'], endereco)
+        self.fila.task_done()
+      except socket.timeout:
+        continue
+   
+    # desconectando...
+    self.soquete.close()        
+
 # Gera e processa mensagens no formato JSON
 class Mensagens:
   def __init__(self, ip):
-    self.anaproc = {'update': self.analisarAtualizacao,
-                    'data': self.analisarDados,
-                    'trace': 0,
-                    'table': 0}
+    self.anaproc = {"update": self.analisarAtualizacao,
+                    "data": self.analisarDados,
+                    "trace": 0,
+                    "table": 0}
     self.origem = ip
     
   def analisar(self, mensagem):
@@ -192,7 +285,9 @@ class Mensagens:
       analisarproc = self.anaproc[mensagem["type"]]
       analisarproc(mensagem)
     else:
-      enviathread.repassar(dest, json.dumps(mensagem).encode())
+      if not enviathread.repassar(dest, json.dumps(mensagem).encode()):
+        origem = mensagem["source"]
+        enviathread.enviar(origem, MSG_DADOS, ROTA_NAOCONHECIDA.format(dest))
 
   def analisarAtualizacao(self, mensagem):
     #distancia = {'proximo': '0.0.0.0', 'peso': 0}
@@ -223,10 +318,10 @@ class Mensagens:
   # define que gerar() é um método privado
   __gerar = gerar
     
-  def gerarAtualizacao(self, destino, distancias):
+  def gerarAtualizacao(self, destino, dists):
     msg = self.gerar(destino)
     msg["type"] = "update"
-    msg["distances"] = distancias
+    msg["distances"] = dists
     
     return json.dumps(msg).encode()
   
@@ -321,7 +416,7 @@ class RotasAtualizadasThread(threading.Thread):
     while(self.ativa):
       dests = enlaces.obtertudo()
       for d in dests:
-        dist = distancias.obterotimizadas(d)
+        dist = distancias.obterpesos(d)
         enviathread.enviar(d, MSG_ATUALIZA, dist)
       time.sleep(self.intervalo)
     # desligando...
@@ -359,7 +454,7 @@ def cmd_add(args):
   if len(args) > 2:
     ip = args[1]
     peso = int(args[2])
-    distancias.adicionar(ip, ip, peso, parametros['ip'])
+    distancias.adicionar(ip, ip, peso)
     enlaces.adicionar(ip)
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
@@ -367,7 +462,7 @@ def cmd_add(args):
 def cmd_del(args):
   if len(args) > 1:
     enlaces.remover(args[1])
-    distancias.remover(args[1])
+    distancias.removerproximo(args[1])
   else:
     print(ARGS_INSUFICIENTES.format(args[0]))
 
@@ -379,8 +474,8 @@ def cmd_ip(args):
   print("    Endereço: . . . . : {0}".format(parametros['ip'])) 
   
 def cmd_distances(args):
-  print("IP        PESO     PROXIMO      APRENDEU DE")
-  print("===========================================")
+  print("IP              PESO  PROXIMO")
+  print("====================================")
   distancias.exibir()
 
 def cmd_links(args):
@@ -429,7 +524,6 @@ def cmdline_manipular():
 # -----------------------------------------
 def app_sair():
   enlaces.removertudo()
-  distancias.removertudo()
   rotasthread.desligar()
   rotasthread.join()
   processathread.desligar()
