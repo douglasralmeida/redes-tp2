@@ -62,12 +62,10 @@ class Rota():
 # Gerencia todas as rotas conhecidas para um nó
 # na rede, ordenando-as a partir da menor
 class Rotas():
-  index = 0
-  lista = list()
-
   # Construtor da classe
   def __init__(self):
-    pass
+    self.index = 0
+    self.lista = list()
 
   # Interador sobre a lista de rotas
   def __iter__(self):
@@ -89,7 +87,7 @@ class Rotas():
 
   # formata em string para exibição
   def __str__(self):
-    primeiro = self.lista[0]    
+    primeiro = self.lista[0]
     return "{0: <5} {1}".format(primeiro.peso, primeiro.prox)
 
   # Adiciona uma rota conhecida na lista
@@ -131,29 +129,26 @@ class Rotas():
 
 # Todas as rotas conhecidas na rede
 class Distancias():
-  #modelo dicionario:
-  #rotas = {'ip': Rotas()}
-  rotas = dict()
-
-  def __init(self):
-    pass
+  # Construtor da classe
+  def __init__(self):
+    self.rotas = {}
 
   # adiciona uma rota à lista de rotas conhecidas
   def adicionar(self, ip, proximo, peso):
     rota = Rota(proximo, peso)
     if not ip in self.rotas:
-      self.rotas[ip] = Rotas()
+      rotas = Rotas()
+      self.rotas[ip] = rotas
       self.rotas[ip].adicionar(rota)
     else:
       if rota in self.rotas[ip]:
         self.rotas[ip].atualizar(rota)
       else:
-        self.rotas[ip].adicionar(rota)    
+        self.rotas[ip].adicionar(rota)
 
   def exibir(self):
     for (c, rotas) in self.rotas.items():
       print("{0: <15} {1}".format(c, rotas))
-      #print("%15s" % c, rotas)
 
   # elimina da lista de rotas aquelas onde o destino
   # é o proximo da rota ou é a origem de onde
@@ -193,12 +188,9 @@ class Distancias():
 
 # Gerencia os enlaces na rede
 class Enlaces():
-  #modelo dicionario:
-  #enlace = {'ip': '0.0.0.0'}
-  lista = {}
-
-  def __init(self):
-    pass
+  # Construtor da classe
+  def __init__(self):
+    self.lista = {}
     
   def adicionar(self, ip):
     enlace = {'valor': 1}
@@ -222,8 +214,6 @@ class Enlaces():
 
 # Thread para Enviar dados
 class EnviaDadosThread(threading.Thread):
-  msg = None
-
   def __init__(self, soquete):
     threading.Thread.__init__(self)
     msg = Mensagens(parametros['ip'])
@@ -278,7 +268,7 @@ class Mensagens:
                     "trace": 0,
                     "table": 0}
     self.origem = ip
-    
+
   def analisar(self, mensagem):
     dest = mensagem["destination"]
     if dest == parametros["ip"]:
@@ -287,7 +277,7 @@ class Mensagens:
     else:
       if not enviathread.repassar(dest, json.dumps(mensagem).encode()):
         origem = mensagem["source"]
-        enviathread.enviar(origem, MSG_DADOS, ROTA_NAOCONHECIDA.format(dest))
+        #enviathread.enviar(origem, MSG_DADOS, ROTA_NAOCONHECIDA.format(dest))
 
   def analisarAtualizacao(self, mensagem):
     #distancia = {'proximo': '0.0.0.0', 'peso': 0}
