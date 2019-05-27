@@ -154,6 +154,13 @@ class Distancias():
       else:
         self.rotas[ip].adicionar(rota)
 
+  def checartempovida(self):
+    for c in list(self.rotas.keys()):
+      rotas = self.rotas[c]
+      rotas.reduzirtempovida()
+      if len(rotas) == 0:
+        del self.rotas[c]
+
   def exibir(self):
     for (c, rotas) in self.rotas.items():
       print("{0: <15} {1}".format(c, rotas))
@@ -166,10 +173,6 @@ class Distancias():
     pesos = {}
     for c in list(self.rotas.keys()):
       rotas = self.rotas[c]
-      rotas.reduzirtempovida()
-      if len(rotas) == 0:
-        del self.rotas[c]
-        continue
       if ip == c:
         continue
       rota = rotas.obtermelhoresrotas()[0]
@@ -291,7 +294,9 @@ class Mensagens:
     else:
       if not enviathread.repassar(dest, json.dumps(mensagem).encode()):
         origem = mensagem["source"]
-        #enviathread.enviar(origem, MSG_DADOS, ROTA_NAOCONHECIDA.format(dest))
+        tipo = mensagem["type"]
+        if tipo == "trace" or tipo == "table":
+          enviathread.enviar(origem, MSG_DADOS, ROTA_NAOCONHECIDA.format(dest))
 
   def analisarAtualizacao(self, mensagem):
     #distancia = {'proximo': '0.0.0.0', 'peso': 0}
@@ -418,6 +423,7 @@ class RotasAtualizadasThread(threading.Thread):
   # gera a msg de rotas atualizadas a cada intevalo de tempo
   def run(self):
     while(self.ativa):
+      distancias.checartempovida()
       dests = enlaces.obtertudo()
       for d in dests:
         dist = distancias.obterpesos(d)
