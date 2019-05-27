@@ -40,9 +40,10 @@ rotasthread = None
 # Armazena uma rota conhecida com o seu peso
 class Rota():
   # Construtor da classe
-  def __init__ (self, prox, peso):
+  def __init__ (self, prox, peso, tdv):
     self.peso = peso
     self.prox = prox
+    self.tempovida = tdv
 
   # Testes de igualdade
   def __eq__(self, outro):
@@ -57,7 +58,7 @@ class Rota():
 
   # formata em string para exibição
   def __str__(self):
-    return str(self.peso) + "     " + str(self.prox)
+    return "{0: <5} {1}  {2}".format(self.peso, self.prox, self.tempovida)
 
 # Gerencia todas as rotas conhecidas para um nó
 # na rede, ordenando-as a partir da menor
@@ -72,14 +73,14 @@ class Rotas():
     return self
 
   def __len__(self):
-    return length(self.lista)
+    return len(self.lista)
 
   def __next__(self):
     if self.index == len(self.lista):
       raise StopIteration
     self.index = self.index + 1
     
-    return self.lista[self.index-1]
+    return self.lista[self.index - 1]
 
   # representação em string
   def __repr__(self):
@@ -88,7 +89,7 @@ class Rotas():
   # formata em string para exibição
   def __str__(self):
     primeiro = self.lista[0]
-    return "{0: <5} {1}".format(primeiro.peso, primeiro.prox)
+    return str(primeiro)
 
   # Adiciona uma rota conhecida na lista
   def adicionar(self, rota):
@@ -119,6 +120,12 @@ class Rotas():
 
     return melhoresrotas
 
+  def reduzirtempovida(self):
+    for r in self.lista:
+      r.tempovida = r.tempovida - 1
+      if r.tempovida < 0:
+        self.lista.remove(r)
+
   # Remove todas as rotas conhecidas
   # na lista onde o proximo é o ip
   # especificado
@@ -130,12 +137,13 @@ class Rotas():
 # Todas as rotas conhecidas na rede
 class Distancias():
   # Construtor da classe
-  def __init__(self):
+  def __init__(self, tdv):
     self.rotas = {}
+    self.tempovida = tdv
 
   # adiciona uma rota à lista de rotas conhecidas
   def adicionar(self, ip, proximo, peso):
-    rota = Rota(proximo, peso)
+    rota = Rota(proximo, peso, self.tempovida)
     if not ip in self.rotas:
       rotas = Rotas()
       self.rotas[ip] = rotas
@@ -156,7 +164,12 @@ class Distancias():
   def obterpesos(self, ip):
     #ip: peso
     pesos = {}
-    for (c, rotas) in self.rotas.items():
+    for c in list(self.rotas.keys()):
+      rotas = self.rotas[c]
+      rotas.reduzirtempovida()
+      if len(rotas) == 0:
+        del self.rotas[c]
+        continue
       if ip == c:
         continue
       rota = rotas.obtermelhoresrotas()[0]
@@ -181,10 +194,11 @@ class Distancias():
       return None
   
   def removerproximo(self, ip):
-    for (c, rotas) in self.rotas.items():
+    for c in list(self.rotas.keys()):
+      rotas = self.rotas[c]
       rotas.remover(ip)
       if len(rotas) == 0:
-        del rotas
+        del self.rotas[c]
 
 # Gerencia os enlaces na rede
 class Enlaces():
@@ -396,7 +410,7 @@ class RotasAtualizadasThread(threading.Thread):
   def __init__(self, intervalo):
     threading.Thread.__init__(self)
     self.intervalo = intervalo
-    self.ativa = True    
+    self.ativa = True
 
   def desligar(self):
     self.ativa = False
@@ -464,7 +478,7 @@ def cmd_ip(args):
   print("    Endereço: . . . . : {0}".format(parametros['ip'])) 
   
 def cmd_distances(args):
-  print("IP              PESO  PROXIMO")
+  print("IP              PESO  PROXIMO    TTL")
   print("====================================")
   distancias.exibir()
 
@@ -549,7 +563,7 @@ def conexoes_iniciar(param):
 # =================
 if len(sys.argv) > 2:
   args_processar(parametros)
-  distancias = Distancias()
+  distancias = Distancias(4 * parametros['periodo'])
   enlaces = Enlaces()
   processathread = ProcessaDadosThread()
   processathread.start()
