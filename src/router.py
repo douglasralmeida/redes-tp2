@@ -47,10 +47,9 @@ class Rota():
 
   # Testes de igualdade
   def __eq__(self, outro):
-    return  isinstance(outro, Rota) and self.prox == outro.prox
+    res = isinstance(outro, Rota) and self.prox == outro.prox
 
-  def __hash__(self):
-    return hash(self.prox)
+    return  res
 
   # representação em string
   def __repr__(self):
@@ -67,6 +66,9 @@ class Rotas():
   def __init__(self):
     self.index = 0
     self.lista = list()
+
+  def __contains__(self, item):
+    return item in self.lista
 
   # Interador sobre a lista de rotas
   def __iter__(self):
@@ -120,6 +122,9 @@ class Rotas():
 
     return melhoresrotas
 
+  def obtertudo(self):
+    return self.lista
+
   def reduzirtempovida(self):
     for r in self.lista:
       r.tempovida = r.tempovida - 1
@@ -148,11 +153,10 @@ class Distancias():
       rotas = Rotas()
       self.rotas[ip] = rotas
       self.rotas[ip].adicionar(rota)
+    elif rota in self.rotas[ip]:
+      self.rotas[ip].atualizar(rota)
     else:
-      if rota in self.rotas[ip]:
-        self.rotas[ip].atualizar(rota)
-      else:
-        self.rotas[ip].adicionar(rota)
+      self.rotas[ip].adicionar(rota)
 
   def checartempovida(self):
     for c in list(self.rotas.keys()):
@@ -195,7 +199,18 @@ class Distancias():
       return rotas[i].prox
     else:
       return None
-  
+
+  def obtertabela(self):
+    lista = list()
+    for ip in self.rotas.keys():
+      rotas = self.rotas[ip].obtertudo()
+      for r in rotas:        
+        tupla = tuple((ip, r.prox, r.peso))
+        lista.append(tupla)
+    lista.sort(key=lambda x: (x[0], x[1]))
+    
+    return lista
+
   def removerproximo(self, ip):
     for c in list(self.rotas.keys()):
       rotas = self.rotas[c]
@@ -280,7 +295,7 @@ class EnviaDadosThread(threading.Thread):
         self.fila.task_done()
       except socket.timeout:
         continue
-   
+
     # desconectando...
     self.soquete.close()        
 
@@ -290,7 +305,7 @@ class Mensagens:
     self.anaproc = {"update": self.analisarAtualizacao,
                     "data": self.analisarDados,
                     "trace": self.analisarRastro,
-                    "table": 0}
+                    "table": self.analisarTabela}
     self.origem = ip
 
   def analisar(self, mensagem):
@@ -307,14 +322,13 @@ class Mensagens:
           enviathread.enviar(origem, MSG_DADOS, ROTA_NAOCONHECIDA.format(dest))
 
   def analisarAtualizacao(self, mensagem):
-    #distancia = {'proximo': '0.0.0.0', 'peso': 0}
     prox = mensagem["source"]
     dists = mensagem["distances"]
     for (c, p) in dists.items():
       ip = c
       peso = int(p) + 1 
       distancias.adicionar(ip, prox, peso)
-  
+
   def analisarDados(self, mensagem):
     dados = mensagem["payload"]
     print(dados)
@@ -329,9 +343,14 @@ class Mensagens:
     else:
       enviathread.repassar(destino, mensagem)
 
+  def analisarTabela(self, mensagem):
+    tabela = distancias.obtertabela()
+    origem = mensagem["source"]
+    enviathread.enviar(origem, MSG_DADOS, tabela)
+
   def converter(self, mensagem):
     msg = json.loads(mensagem.decode())
-
+    
     return msg
 
   def gerar(self, destino):
@@ -341,7 +360,7 @@ class Mensagens:
     msg["destination"] = destino
 
     return msg
-    
+
   # define que gerar() é um método privado
   __gerar = gerar
     
@@ -370,7 +389,6 @@ class Mensagens:
   def gerarTabela(self, destino, tabela):
     msg = self.gerar(destino)
     msg["type"] = "table"
-    print("ops!")
 
     return json.dumps(msg).encode()
     
@@ -513,6 +531,14 @@ def cmd_links(args):
   print("==========================")
   enlaces.exibir()
 
+def cmd_table(args):
+  if len(args) > 1:
+    destino = args[1]
+    if not enviathread.enviar(destino, MSG_TABELA, []):
+      print(ROTA_NAOCONHECIDA.format(destino))
+  else:
+    print(ARGS_INSUFICIENTES.format(args[0]))
+
 def cmd_trace(args):
   if len(args) > 1:
     destino = args[1]
@@ -525,6 +551,7 @@ cmds_disponiveis = {
   "add": cmd_add,
   "del": cmd_del,
   "quit": cmd_quit,
+  "table": cmd_table,
   "trace": cmd_trace,
   "ip": cmd_ip,
   "links": cmd_links,
