@@ -13,7 +13,7 @@ import time
 
 # CONSTANTES DO PROGRAMA
 # ======================
-EXIBIR_LOG         = True
+EXIBIR_LOG         = False
 MAX_PACOTE         = 65507
 MSG_ATUALIZA       = 0
 MSG_DADOS          = 1
@@ -208,7 +208,7 @@ class Distancias():
         tupla = tuple((ip, r.prox, r.peso))
         lista.append(tupla)
     lista.sort(key=lambda x: (x[0], x[1]))
-    
+
     return lista
 
   def removerproximo(self, ip):
@@ -227,7 +227,7 @@ class Enlaces():
   def adicionar(self, ip):
     enlace = {'valor': 1}
     self.lista[ip] = enlace
-    
+
   def exibir(self):
     for c in self.lista.keys():
       print(c)
@@ -251,6 +251,7 @@ class EnviaDadosThread(threading.Thread):
     msg = Mensagens(parametros['ip'])
     self.msgsproc = [msg.gerarAtualizacao, msg.gerarDados, msg.gerarRastreio, msg.gerarTabela]
     self.soquete = soquete
+    self.soquete.settimeout(1)
     self.fila = queue.Queue()
     self.ativa = True
 
@@ -410,7 +411,7 @@ class ProcessaDadosThread(threading.Thread):
   def run(self):
     while self.ativa:
       try:
-        msg = self.fila.get(True, 2)
+        msg = self.fila.get(True, 1)
       except (queue.Empty):
         continue
       self.msgs.analisar(msg)
@@ -445,7 +446,6 @@ class RecebeDadosThread(threading.Thread):
     
   def onrecv(self, msg):
     processathread.processar(msg)
-#    log("\n[>] Recebeu dados: " + dados.decode())
 
 # Thread para gerar rotas atualizadas
 class RotasAtualizadasThread(threading.Thread):
