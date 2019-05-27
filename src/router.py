@@ -76,7 +76,7 @@ class Rotas():
     return len(self.lista)
 
   def __next__(self):
-    if self.index == len(self.lista):
+    if self.index >= len(self.lista):
       raise StopIteration
     self.index = self.index + 1
     
@@ -242,19 +242,26 @@ class EnviaDadosThread(threading.Thread):
   def desligar(self):
     self.ativa = False
 
+  # Converte e envia
   def enviar(self, destino, tipo, conteudo):
     ip = distancias.obterproximo(destino)
     if ip != None:
-      pac = {'destino': ip, 'conteudo': self.msgsproc[tipo](destino, conteudo)}
+      msg = self.msgsproc[tipo](destino, conteudo)
+      pac = {'destino': ip, 'conteudo': msg}
       self.fila.put_nowait(pac)
       return True
     else:
-      return False
+      if destino == parametros["ip"]:
+        msg = self.msgsproc[tipo](destino, conteudo)
+        processathread.processar(msg)
+        return True
+      else:
+        return False
 
   def repassar(self, destino, mensagem):
     ip = distancias.obterproximo(destino)
     if ip != None:
-      pac = {'destino': ip, 'conteudo': mensagem}
+      pac = {'destino': ip, 'conteudo': json.dumps(mensagem).encode()}
       self.fila.put_nowait(pac)
       return True
     else:
@@ -282,17 +289,18 @@ class Mensagens:
   def __init__(self, ip):
     self.anaproc = {"update": self.analisarAtualizacao,
                     "data": self.analisarDados,
-                    "trace": 0,
+                    "trace": self.analisarRastro,
                     "table": 0}
     self.origem = ip
 
   def analisar(self, mensagem):
     dest = mensagem["destination"]
-    if dest == parametros["ip"]:
-      analisarproc = self.anaproc[mensagem["type"]]
+    tipo = mensagem["type"]
+    analisarproc = self.anaproc[tipo]
+    if dest == parametros["ip"] or tipo == "trace":
       analisarproc(mensagem)
     else:
-      if not enviathread.repassar(dest, json.dumps(mensagem).encode()):
+      if not enviathread.repassar(dest, mensagem):
         origem = mensagem["source"]
         tipo = mensagem["type"]
         if tipo == "trace" or tipo == "table":
@@ -311,17 +319,27 @@ class Mensagens:
     dados = mensagem["payload"]
     print(dados)
 
+  def analisarRastro(self, mensagem):
+    destino = mensagem["destination"]
+    origem =  mensagem["source"]
+    if destino != origem:
+      mensagem["hops"].append(parametros["ip"])
+    if destino == parametros["ip"]:
+      enviathread.enviar(origem, MSG_DADOS, mensagem["hops"])
+    else:
+      enviathread.repassar(destino, mensagem)
+
   def converter(self, mensagem):
     msg = json.loads(mensagem.decode())
 
     return msg
-  
+
   def gerar(self, destino):
     msg = {}
     msg["type"] = ""
     msg["source"] = self.origem
     msg["destination"] = destino
-    
+
     return msg
     
   # define que gerar() é um método privado
@@ -333,17 +351,18 @@ class Mensagens:
     msg["distances"] = dists
     
     return json.dumps(msg).encode()
-  
+
   def gerarDados(self, destino, dados):
     msg = self.gerar(destino)
     msg["type"] = "data"
     msg["payload"] = dados
 
     return json.dumps(msg).encode()
-  
+
   def gerarRastreio(self, destino, rastro):
     msg = self.gerar(destino)
     msg["type"] = "trace"
+    rastro.append(parametros["ip"])
     msg["hops"] = rastro
 
     return json.dumps(msg).encode()
@@ -481,7 +500,7 @@ def cmd_quit(args):
 
 def cmd_ip(args):
   print("\nConfiguração de IP:\n")
-  print("    Endereço: . . . . : {0}".format(parametros['ip'])) 
+  print("    Endereço: . . . . : {0}".format(parametros['ip']))
   
 def cmd_distances(args):
   print("IP              PESO  PROXIMO    TTL")
@@ -494,10 +513,19 @@ def cmd_links(args):
   print("==========================")
   enlaces.exibir()
 
+def cmd_trace(args):
+  if len(args) > 1:
+    destino = args[1]
+    if not enviathread.enviar(destino, MSG_RASTREIO, []):
+      print(ROTA_NAOCONHECIDA.format(destino))
+  else:
+    print(ARGS_INSUFICIENTES.format(args[0]))
+
 cmds_disponiveis = {
   "add": cmd_add,
   "del": cmd_del,
   "quit": cmd_quit,
+  "trace": cmd_trace,
   "ip": cmd_ip,
   "links": cmd_links,
   "distances": cmd_distances
